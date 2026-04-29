@@ -72,7 +72,7 @@ An AI-powered AI assistant and CRM platform designed specifically for tradespeop
    ```
 
 ## 📝 Roadmap
-- [x] **Phase 1**: Foundation & Core Infrastructure (WhatsApp Webhook, ASR Pipeline, Postgres+Redis setup)
+- [ ] **Phase 1**: Foundation & Core Infrastructure (WhatsApp Webhook, ASR Pipeline, Postgres+Redis setup)
 - [ ] **Phase 2**: AI Agents, Quoting, and Scheduling (LangChain Integration, PDF Generation)
 - [ ] **Phase 3**: Follow-ups, Voice Outbound, and Marketing
 - [ ] **Phase 4**: Localization & Multi-language Support
