@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies required by OpenCV and PyTorch
+RUN apt-get update && apt-get install -y \
+    libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyTorch with CUDA 12.1 support
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Install diffusers and FastAPI dependencies
+RUN pip install diffusers transformers accelerate fastapi uvicorn pydantic
+
+# Copy the worker code
+COPY ./app/services/image_worker.py /app/image_worker.py
+
+# Expose port
+EXPOSE 8001
+
+# Run the API
+CMD ["uvicorn", "image_worker:app", "--host", "0.0.0.0", "--port", "8001"]

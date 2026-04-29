@@ -1,0 +1,244 @@
+# ── TradesBot Kubernetes Deployment ──────────────────────────
+# Namespace, API Deployment, Worker Deployment, Services, HPA, Ingress
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tradesbot
+  labels:
+    app: tradesbot
+
+---
+# ── API Deployment ──────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradesbot-api
+  namespace: tradesbot
+  labels:
+    app: tradesbot
+    component: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tradesbot
+      component: api
+  template:
+    metadata:
+      labels:
+        app: tradesbot
+        component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: api
+        image: tradesbot/api:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        envFrom:
+        - secretRef:
+            name: tradesbot-secrets
+        - configMapRef:
+            name: tradesbot-config
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 10
+
+---
+# ── Worker Deployment ───────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradesbot-worker
+  namespace: tradesbot
+  labels:
+    app: tradesbot
+    component: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tradesbot
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: tradesbot
+        component: worker
+    spec:
+      containers:
+      - name: worker
+        image: tradesbot/worker:latest
+        command: ["python", "-m", "app.workers.message_worker"]
+        envFrom:
+        - secretRef:
+            name: tradesbot-secrets
+        - configMapRef:
+            name: tradesbot-config
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1500m"
+            memory: "2Gi"
+
+---
+# ── Service ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradesbot-api
+  namespace: tradesbot
+  labels:
+    app: tradesbot
+    component: api
+spec:
+  selector:
+    app: tradesbot
+    component: api
+  ports:
+  - port: 80
+    targetPort: 8000
+    name: http
+  type: ClusterIP
+
+---
+# ── HPA (Horizontal Pod Autoscaler) ────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tradesbot-api-hpa
+  namespace: tradesbot
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tradesbot-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tradesbot-worker-hpa
+  namespace: tradesbot
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tradesbot-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+
+---
+# ── Ingress ─────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradesbot-ingress
+  namespace: tradesbot
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.tradesbot.in
+    secretName: tradesbot-tls
+  rules:
+  - host: api.tradesbot.in
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tradesbot-api
+            port:
+              number: 80
+
+---
+# ── ConfigMap ───────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradesbot-config
+  namespace: tradesbot
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "info"
+  REDIS_URL: "redis://tradesbot-redis:6379/0"
+  MINIO_ENDPOINT: "tradesbot-minio:9000"
+
+---
+# ── Secret Template (values should be base64-encoded) ───────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tradesbot-secrets
+  namespace: tradesbot
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql+asyncpg://tradesbot:CHANGE_ME@tradesbot-db:5432/tradesbot"
+  GROQ_API_KEY: "CHANGE_ME"
+  TWILIO_ACCOUNT_SID: "CHANGE_ME"
+  TWILIO_AUTH_TOKEN: "CHANGE_ME"
+  TWILIO_WHATSAPP_FROM: "whatsapp:+14155238886"
+  MINIO_ACCESS_KEY: "CHANGE_ME"
+  MINIO_SECRET_KEY: "CHANGE_ME"
